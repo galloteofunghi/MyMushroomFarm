@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import type { FarmElement } from '../types';
-import { Copy, RotateCw, Trash2, Warehouse, Box, ThermometerSnowflake, ZoomIn, ZoomOut, Maximize, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, ArrowUpToLine, ArrowDownToLine, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Route, CornerDownRight, Split, ParkingSquare, Truck, MapPin, Building2 } from 'lucide-react';
+import { Copy, RotateCw, Trash2, Warehouse, Box, ThermometerSnowflake, ZoomIn, ZoomOut, Maximize, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, ArrowUpToLine, ArrowDownToLine, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MapPin, Building2 } from 'lucide-react';
 
 interface CanvasProps {
     elements: FarmElement[];
@@ -34,6 +34,7 @@ const Canvas: React.FC<CanvasProps> = ({
     const [resizing, setResizing] = React.useState<{
         id: string; startX: number; startY: number;
         startWidth: number; startHeight: number; startLeft: number; startTop: number; direction: string;
+        rotationRad: number;
     } | null>(null);
     const [isSpacePressed, setIsSpacePressed] = React.useState(false);
 
@@ -127,10 +128,15 @@ const Canvas: React.FC<CanvasProps> = ({
         setDragging({ id, startX: e.clientX, startY: e.clientY });
     };
 
-    const handleResizeStart = (e: React.MouseEvent, id: string, width: number, height: number, left: number, top: number, direction: string) => {
+    const handleResizeStart = (e: React.MouseEvent, id: string, width: number, height: number, left: number, top: number, rotation: number, direction: string) => {
         e.stopPropagation();
         e.preventDefault();
-        setResizing({ id, startX: e.clientX, startY: e.clientY, startWidth: width, startHeight: height, startLeft: left, startTop: top, direction });
+        setResizing({
+            id, startX: e.clientX, startY: e.clientY,
+            startWidth: width, startHeight: height, startLeft: left, startTop: top,
+            direction,
+            rotationRad: (rotation || 0) * (Math.PI / 180)
+        });
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
@@ -242,28 +248,73 @@ const Canvas: React.FC<CanvasProps> = ({
         } else if (resizing) {
             const screenDx = e.clientX - resizing.startX;
             const screenDy = e.clientY - resizing.startY;
-            const deltaX = screenDx / view.scale;
-            const deltaY = screenDy / view.scale;
 
+            // Convert screen delta to unscaled delta
+            const rawDx = screenDx / view.scale;
+            const rawDy = screenDy / view.scale;
+
+            // Rotate delta into local space
+            // For width/height changes, we need component along local axes.
+            // Local X axis: (cos, sin)
+            // Local Y axis: (-sin, cos)
+            const cos = Math.cos(resizing.rotationRad);
+            const sin = Math.sin(resizing.rotationRad);
+
+            const options = {
+                nw: { x: -1, y: -1 }, ne: { x: 1, y: -1 },
+                sw: { x: -1, y: 1 }, se: { x: 1, y: 1 },
+                n: { x: 0, y: -1 }, s: { x: 0, y: 1 },
+                w: { x: -1, y: 0 }, e: { x: 1, y: 0 }
+            };
+
+            const dir = options[resizing.direction as keyof typeof options];
+
+            // Project mouse movement onto local axes
+            // dxLocal represents change in Width direction (Right)
+            // dyLocal represents change in Height direction (Down)
+            const dxLocal = rawDx * cos + rawDy * sin;
+            const dyLocal = rawDx * -sin + rawDy * cos;
+
+            // Calculate resizing
             let newWidth = resizing.startWidth;
             let newHeight = resizing.startHeight;
             let newX = resizing.startLeft;
             let newY = resizing.startTop;
 
-            if (resizing.direction.includes('e')) newWidth = Math.max(50, resizing.startWidth + deltaX);
-            if (resizing.direction.includes('s')) newHeight = Math.max(50, resizing.startHeight + deltaY);
-            if (resizing.direction.includes('w')) {
-                const maxDelta = resizing.startWidth - 50;
-                const validDelta = Math.min(maxDelta, deltaX);
-                newWidth = resizing.startWidth - validDelta;
-                newX = resizing.startLeft + validDelta;
-            }
-            if (resizing.direction.includes('n')) {
-                const maxDelta = resizing.startHeight - 50;
-                const validDelta = Math.min(maxDelta, deltaY);
-                newHeight = resizing.startHeight - validDelta;
-                newY = resizing.startTop + validDelta;
-            }
+            // 1. Calculate DeltaW/H in local space
+            const dW = (dxLocal * dir.x);
+            const dH = (dyLocal * dir.y);
+
+            newWidth = Math.max(20, resizing.startWidth + dW);
+            newHeight = Math.max(20, resizing.startHeight + dH);
+
+            // 2. Adjust Position to account for anchor point
+            // When we resize, the center moves. We need to calculate the Shift of the center
+            // in Local Space, then Rotate it to Global Space, and apply to TopLeft.
+
+            const usedDW = newWidth - resizing.startWidth;
+            const usedDH = newHeight - resizing.startHeight;
+
+            // Center Shift Local:
+            // If East (1): Center moves +dW/2. If West (-1): Center moves -dW/2.
+            // Formula: Shift = (dir * usedD) / 2
+            const shiftX_Local = (dir.x !== 0 ? usedDW / 2 * dir.x : 0);
+            const shiftY_Local = (dir.y !== 0 ? usedDH / 2 * dir.y : 0);
+
+            // Rotate Shift to Global
+            const shiftX_Global = shiftX_Local * cos - shiftY_Local * sin;
+            const shiftY_Global = shiftX_Local * sin + shiftY_Local * cos;
+
+            // Apply Shift to Top Left (Centroid Logic compensation)
+            // The visual bounding box center should move by ShiftGlobal.
+            // Our 'x/y' is TopLeft. 
+            // NewCenter = OldCenter + ShiftGlobal.
+            // NewTopLeft = NewCenter - NewSize/2.
+            // NewTopLeft = (OldTopLeft + OldSize/2) + ShiftGlobal - NewSize/2.
+            // NewTopLeft = OldTopLeft + ShiftGlobal - (NewSize - OldSize)/2.
+
+            newX = resizing.startLeft + shiftX_Global - (usedDW / 2);
+            newY = resizing.startTop + shiftY_Global - (usedDH / 2);
 
             onResize(resizing.id, newWidth, newHeight, newX, newY);
         }
@@ -292,7 +343,7 @@ const Canvas: React.FC<CanvasProps> = ({
     const selectionBounds = getSelectionBounds();
 
     // Helper to render distinct internal content
-    const renderElementContent = (el: FarmElement, isSelected: boolean) => {
+    const renderElementContent = (el: FarmElement) => {
         // SimCity Style Logic
 
         // ROAD STRAIGHT
@@ -359,6 +410,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 ${!el.color && el.type === 'greenhouse' ? 'bg-green-900/50' : ''}
                 ${!el.color && el.type === 'room' ? 'bg-blue-900/50' : ''}
                 ${!el.color && el.type === 'fridge' ? 'bg-cyan-900/50' : ''}
+                ${!el.color && el.type === 'incubation_room' ? 'bg-purple-900/50' : ''} 
                 ${!el.color && el.type === 'loading_area' ? 'bg-yellow-900/20 striped-bg' : ''}
                 ${!el.color && el.type === 'office' ? 'bg-slate-700' : ''}
             `}>
@@ -451,7 +503,7 @@ const Canvas: React.FC<CanvasProps> = ({
                             `}
                         >
                             {/* RENDER CONTENT */}
-                            {renderElementContent(el, isSelected)}
+                            {renderElementContent(el)}
 
 
                             {/* Floating Icon (Only for non-road/infra elements to be cleaner) */}
@@ -460,6 +512,7 @@ const Canvas: React.FC<CanvasProps> = ({
                                     {el.type === 'greenhouse' && <Warehouse size={16} />}
                                     {el.type === 'room' && <Box size={16} />}
                                     {el.type === 'fridge' && <ThermometerSnowflake size={16} />}
+                                    {el.type === 'incubation_room' && <ThermometerSnowflake size={16} className="text-purple-400" />}
                                     {el.type === 'loading_area' && <MapPin size={16} />}
                                     {el.type === 'office' && <Building2 size={16} />}
                                 </div>
@@ -507,10 +560,10 @@ const Canvas: React.FC<CanvasProps> = ({
 
                             {isSelected && selectedIds.length === 1 && !dragging && (
                                 <>
-                                    <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize -ml-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, 'nw')} />
-                                    <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize -mr-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, 'ne')} />
-                                    <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize -ml-1.5 -mb-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, 'sw')} />
-                                    <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize -mr-1.5 -mb-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, 'se')} />
+                                    <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize -ml-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'nw')} />
+                                    <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize -mr-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'ne')} />
+                                    <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize -ml-1.5 -mb-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'sw')} />
+                                    <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize -mr-1.5 -mb-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'se')} />
                                 </>
                             )}
                         </div>

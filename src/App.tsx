@@ -1,21 +1,61 @@
 import { useState, useEffect } from 'react';
-import ElementList from './components/ElementList';
 import Canvas from './components/Canvas';
-import type { FarmElement } from './types';
-import { Layout, Undo2, Redo2 } from 'lucide-react';
+import ElementList from './components/ElementList';
+import ProjectWizard from './components/ProjectWizard';
+import MainLayout from './components/MainLayout';
+import { persistenceManager } from './services/persistence';
+import type { FarmElement, Project } from './types';
 
 function App() {
-  // State
-  const [elements, setElements] = useState<FarmElement[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [currentView, setCurrentView] = useState('farm-designer');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // --- Canvas State (Synced with Project) ---
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // We keep local state for performance, but sync to Project on changes
+  // Actually, we can just edit the project.elements directly or sync states.
+  // For now to minimize refactor, let's keep 'elements', 'history' as local and sync UP to project.
+  const [elements, setElements] = useState<FarmElement[]>([]);
+  const [history, setHistory] = useState<FarmElement[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
-  const [clipboard, setClipboard] = useState<FarmElement[]>([]);
 
-  // History State
-  const [history, setHistory] = useState<FarmElement[][]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // History Helper
+  // 1. Initial Load
+  useEffect(() => {
+    const load = async () => {
+      const savedProject = await persistenceManager.loadProject();
+      if (savedProject) {
+        setProject(savedProject);
+        setElements(savedProject.elements || []);
+        setHistory([savedProject.elements || []]);
+      }
+      setIsLoading(false);
+    };
+    load();
+  }, []);
+
+  // 2. Auto-Save Project when elements change
+  useEffect(() => {
+    if (project) {
+      const updatedProject = { ...project, elements, lastModified: Date.now() };
+      // Debounce save slightly or just save (PersistenceManager simulates async)
+      persistenceManager.saveProject(updatedProject);
+      // We ideally should update 'project' state too, but let's avoid render loops.
+      // Actually we need to keep 'project' ref up to date for other tabs.
+    }
+  }, [elements, project?.id]); // Depend on ID to ensure we have a project loaded
+
+
+  const handleProjectCreated = (newProject: Project) => {
+    setProject(newProject);
+    setElements([]); // New project starts empty
+    persistenceManager.saveProject(newProject);
+  };
+
+  // --- Canvas Handlers (Existing Logic) ---
   const pushToHistory = (newElements: FarmElement[]) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newElements);
@@ -23,382 +63,239 @@ function App() {
     setHistoryIndex(newHistory.length - 1);
   };
 
-  // Initialize history
-  useEffect(() => {
-    if (history.length === 0 && elements.length === 0) {
-      setHistory([[]]);
-      setHistoryIndex(0);
-    }
-  }, []);
-
-  const handleUndo = () => {
-    if (historyIndex > 0) {
-      const newIndex = historyIndex - 1;
-      setElements(history[newIndex]);
-      setHistoryIndex(newIndex);
-    }
-  };
-
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      const newIndex = historyIndex + 1;
-      setElements(history[newIndex]);
-      setHistoryIndex(newIndex);
-    }
-  };
-
-
-  // --- Handlers ---
-
   const handleDrop = (item: any, dropX: number, dropY: number) => {
-    // Correct position based on view transform
     const x = (dropX - view.x) / view.scale;
     const y = (dropY - view.y) / view.scale;
-
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `el-${Date.now()}-${Math.random()}`;
+
+    // Default size from drag item or fallback
+    const width = item.width || 100;
+    const height = item.height || 100;
+
     const newElement: FarmElement = {
       id,
       name: `${item.label} ${elements.filter(e => e.type === item.type).length + 1}`,
       type: item.type,
-      width: item.width,
-      height: item.height,
+      width,
+      height,
       x,
       y,
+      rotation: 0
     };
 
-    // Explicit update
     const nextElements = [...elements, newElement];
     setElements(nextElements);
     pushToHistory(nextElements);
     setSelectedIds([id]);
   };
 
-  const handleSelect = (id: string | null, multi: boolean) => {
-    if (id === null) {
-      if (!multi) setSelectedIds([]);
-      return;
-    }
-
-    setSelectedIds(prev => {
-      if (multi) {
-        return prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id];
+  const handleMove = (id: string, dx: number, dy: number, isDelta = false) => {
+    const nextElements = elements.map(el => {
+      if (el.id === id || (selectedIds.includes(el.id) && selectedIds.includes(id))) {
+        return {
+          ...el,
+          x: isDelta ? el.x + dx : dx,
+          y: isDelta ? el.y + dy : dy
+        };
       }
-      return [id];
+      return el;
     });
-  };
-
-  const handleRemove = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const nextElements = elements.filter(el => !ids.includes(el.id));
     setElements(nextElements);
-    pushToHistory(nextElements);
-    setSelectedIds(prev => prev.filter(id => !ids.includes(id)));
-  };
-
-
-  const handleMoveLive = (id: string, dx: number, dy: number, isDelta: boolean = false) => {
-    setElements(prev => {
-      const primary = prev.find(el => el.id === id);
-      if (!primary) return prev;
-
-      let deltaX = 0;
-      let deltaY = 0;
-
-      if (!isDelta) {
-        deltaX = dx - primary.x;
-        deltaY = dy - primary.y;
-      } else {
-        deltaX = dx;
-        deltaY = dy;
-      }
-
-      if (selectedIds.includes(id)) {
-        return prev.map(el => {
-          if (selectedIds.includes(el.id)) {
-            return { ...el, x: el.x + deltaX, y: el.y + deltaY };
-          }
-          return el;
-        });
-      } else {
-        return prev.map(el => el.id === id ? { ...el, x: el.x + deltaX, y: el.y + deltaY } : el);
-      }
-    });
-  };
-
-  const handleInteractionEnd = () => {
-    // Push current state to history
-    pushToHistory(elements);
   };
 
   const handleResize = (id: string, width: number, height: number, x?: number, y?: number) => {
-    setElements(prev => prev.map(el =>
-      el.id === id
-        ? { ...el, width, height, ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}) }
-        : el
-    ));
+    const nextElements = elements.map(el => {
+      if (el.id === id) {
+        return { ...el, width, height, x: x ?? el.x, y: y ?? el.y };
+      }
+      return el;
+    });
+    setElements(nextElements);
   };
 
   const handleRotate = (id: string) => {
-    const targets = selectedIds.includes(id) ? selectedIds : [id];
-    const nextElements = elements.map(el => targets.includes(el.id) ? { ...el, rotation: (el.rotation || 0) + 90 } : el);
-    setElements(nextElements);
-    pushToHistory(nextElements);
-  };
-
-  const handleColorChange = (id: string, color: string) => {
-    const targets = selectedIds.includes(id) ? selectedIds : [id];
-    const nextElements = elements.map(el => targets.includes(el.id) ? { ...el, color } : el);
-    setElements(nextElements);
-    pushToHistory(nextElements);
-  };
-
-  const handleRename = (id: string, name: string) => {
-    const nextElements = elements.map(el => el.id === id ? { ...el, name } : el);
-    setElements(nextElements);
-    pushToHistory(nextElements);
-  };
-
-  const handleDuplicate = (ids: string[]) => {
-    const toDuplicate = elements.filter(el => ids.includes(el.id));
-    if (toDuplicate.length === 0) return;
-
-    const newIds: string[] = [];
-    const newItems: FarmElement[] = [];
-
-    // Clone current elements first to avoid mutation issues if any (though map is safe)
-    const currentElements = [...elements];
-
-    toDuplicate.forEach(el => {
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `el-${Date.now()}-${Math.random()}`;
-      newIds.push(newId);
-      newItems.push({
-        ...el,
-        id: newId,
-        name: `${el.name} (Copy)`,
-        x: el.x + 20,
-        y: el.y + 20
-      });
+    const nextElements = elements.map(el => {
+      if (el.id === id) {
+        return { ...el, rotation: (el.rotation || 0) + 45 };
+      }
+      return el;
     });
-
-    const nextElements = [...currentElements, ...newItems];
     setElements(nextElements);
     pushToHistory(nextElements);
-    setSelectedIds(newIds);
   };
 
-  const handleDuplicateReturn = (id: string) => {
+  const handleInteractionEnd = () => {
+    if (elements !== history[historyIndex]) {
+      pushToHistory(elements);
+    }
+  };
+
+  const handleRemove = (ids: string[]) => {
+    const nextElements = elements.filter(el => !ids.includes(el.id));
+    setElements(nextElements);
+    pushToHistory(nextElements);
+    setSelectedIds([]);
+  };
+
+  const handleDuplicate = (id: string) => {
+    const el = elements.find(e => e.id === id);
+    if (!el) return;
+    const newEl = { ...el, id: crypto.randomUUID(), x: el.x + 20, y: el.y + 20, name: `${el.name} Copy` };
+    const nextElements = [...elements, newEl];
+    setElements(nextElements);
+    pushToHistory(nextElements);
+    setSelectedIds([newEl.id]);
+  };
+
+  const handleDuplicateReturn = (id: string) => { // Ctrl+Drag
     const el = elements.find(e => e.id === id);
     if (!el) return null;
-
-    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `el-${Date.now()}-${Math.random()}`;
-    const newElement = { ...el, id: newId, name: `${el.name} (Copy)` };
-
-    const nextElements = [...elements, newElement];
+    const newId = crypto.randomUUID();
+    const newEl = { ...el, id: newId, name: `${el.name} Copy` }; // Position will be handled by drag
+    const nextElements = [...elements, newEl];
     setElements(nextElements);
-    // Note: DuplicateReturn is usually starting a drag, so we might wait for interaction end? 
-    // But standard duplicate is immediate. Let's push history.
-    pushToHistory(nextElements);
-
+    // We don't push history yet, wait for drag end
     setSelectedIds([newId]);
     return newId;
   };
 
-
-  // --- Batch Actions ---
-
   const handleAlign = (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
     if (selectedIds.length < 2) return;
+    const selectedEls = elements.filter(e => selectedIds.includes(e.id));
+    let val = 0;
 
-    const selected = elements.filter(el => selectedIds.includes(el.id));
-    if (selected.length === 0) return;
+    if (type === 'left') val = Math.min(...selectedEls.map(e => e.x));
+    if (type === 'right') val = Math.max(...selectedEls.map(e => e.x + e.width)); // Align right edges? Or align to rightmost left edge? Standard is align left edges to minX. Let's do Standard alignment.
+    // Actually standard 'Align Right' aligns right edges to the rightmost edge.
+    if (type === 'right') val = Math.max(...selectedEls.map(e => e.x + e.width));
+    if (type === 'center') {
+      const minX = Math.min(...selectedEls.map(e => e.x));
+      const maxX = Math.max(...selectedEls.map(e => e.x + e.width));
+      val = minX + (maxX - minX) / 2;
+    }
 
-    let targetVal = 0;
-    switch (type) {
-      case 'left': targetVal = Math.min(...selected.map(e => e.x)); break;
-      case 'right': targetVal = Math.max(...selected.map(e => e.x + e.width)); break;
-      case 'top': targetVal = Math.min(...selected.map(e => e.y)); break;
-      case 'bottom': targetVal = Math.max(...selected.map(e => e.y + e.height)); break;
-      case 'center':
-        const minX = Math.min(...selected.map(e => e.x));
-        const maxX = Math.max(...selected.map(e => e.x + e.width));
-        targetVal = minX + (maxX - minX) / 2;
-        break;
-      case 'middle':
-        const minY = Math.min(...selected.map(e => e.y));
-        const maxY = Math.max(...selected.map(e => e.y + e.height));
-        targetVal = minY + (maxY - minY) / 2;
-        break;
+    if (type === 'top') val = Math.min(...selectedEls.map(e => e.y));
+    if (type === 'bottom') val = Math.max(...selectedEls.map(e => e.y + e.height));
+    if (type === 'middle') {
+      const minY = Math.min(...selectedEls.map(e => e.y));
+      const maxY = Math.max(...selectedEls.map(e => e.y + e.height));
+      val = minY + (maxY - minY) / 2;
     }
 
     const nextElements = elements.map(el => {
       if (!selectedIds.includes(el.id)) return el;
-      switch (type) {
-        case 'left': return { ...el, x: targetVal };
-        case 'right': return { ...el, x: targetVal - el.width };
-        case 'top': return { ...el, y: targetVal };
-        case 'bottom': return { ...el, y: targetVal - el.height };
-        case 'center': return { ...el, x: targetVal - el.width / 2 };
-        case 'middle': return { ...el, y: targetVal - el.height / 2 };
-        default: return el;
-      }
+      if (type === 'left') return { ...el, x: val };
+      if (type === 'right') return { ...el, x: val - el.width };
+      if (type === 'center') return { ...el, x: val - el.width / 2 };
+      if (type === 'top') return { ...el, y: val };
+      if (type === 'bottom') return { ...el, y: val - el.height };
+      if (type === 'middle') return { ...el, y: val - el.height / 2 };
+      return el;
     });
-
     setElements(nextElements);
     pushToHistory(nextElements);
   };
 
   const handleDistribute = (type: 'horizontal' | 'vertical') => {
+    // Basic implementation
     if (selectedIds.length < 3) return;
-
-    const selected = elements.filter(el => selectedIds.includes(el.id));
-    selected.sort((a, b) => type === 'horizontal' ? a.x - b.x : a.y - b.y);
-
-    const first = selected[0];
-    const last = selected[selected.length - 1];
-
-    let nextElements = [...elements];
+    // Sort selection
+    const sorted = elements.filter(e => selectedIds.includes(e.id)).sort((a, b) => type === 'horizontal' ? a.x - b.x : a.y - b.y);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
 
     if (type === 'horizontal') {
-      const step = (last.x - first.x) / (selected.length - 1);
-      nextElements = elements.map(el => {
-        if (!selectedIds.includes(el.id)) return el;
-        const index = selected.findIndex(s => s.id === el.id);
-        if (index === 0 || index === selected.length - 1) return el;
-        return { ...el, x: first.x + step * index };
+      // const totalDist = (last.x) - (first.x + first.width); // Distance between First Right and Last Left? No, usually distribute centers or gaps.
+      // Let's distribute centers for simplicity or Even Gaps.
+      // Distribute Centers:
+      const span = (last.x + last.width / 2) - (first.x + first.width / 2);
+      const step = span / (sorted.length - 1);
+      const nextElements = elements.map(el => {
+        const idx = sorted.findIndex(s => s.id === el.id);
+        if (idx === -1) return el;
+        if (idx === 0 || idx === sorted.length - 1) return el;
+        return { ...el, x: (first.x + first.width / 2) + step * idx - el.width / 2 };
       });
+      setElements(nextElements);
+      pushToHistory(nextElements);
     } else {
-      const step = (last.y - first.y) / (selected.length - 1);
-      nextElements = elements.map(el => {
-        if (!selectedIds.includes(el.id)) return el;
-        const index = selected.findIndex(s => s.id === el.id);
-        if (index === 0 || index === selected.length - 1) return el;
-        return { ...el, y: first.y + step * index };
+      const span = (last.y + last.height / 2) - (first.y + first.height / 2);
+      const step = span / (sorted.length - 1);
+      const nextElements = elements.map(el => {
+        const idx = sorted.findIndex(s => s.id === el.id);
+        if (idx === -1) return el;
+        if (idx === 0 || idx === sorted.length - 1) return el;
+        return { ...el, y: (first.y + first.height / 2) + step * idx - el.height / 2 };
       });
+      setElements(nextElements);
+      pushToHistory(nextElements);
     }
-
-    setElements(nextElements);
-    pushToHistory(nextElements);
   };
 
-  // --- Shortcuts ---
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (isLoading) {
+    return <div className="w-full h-screen bg-neutral-950 flex items-center justify-center text-white">Loading...</div>;
+  }
 
-      // Undo/Redo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        if (e.shiftKey) handleRedo();
-        else handleUndo();
-        e.preventDefault();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-        handleRedo();
-        e.preventDefault();
-        return;
-      }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedIds.length > 0) {
-          if (window.confirm(`Eliminare ${selectedIds.length} elementi?`)) {
-            // Cannot call handleRemove directly because it depends on updated selectedIds/elements in closure? 
-            // No, handleRemove uses 'elements' from closure.
-            // But we need to pass ids.
-            // If we use the function defined in render, it uses current scope.
-            // However, inside useEffect, we need to be careful about stale closures.
-            // We added [selectedIds, elements...] to dependency array, so handleKeyDown is recreated.
-            // So calling handleRemove(selectedIds) is safe.
-
-            // We need to access the function. 
-            // Ideally we should extract logic or just invoke it.
-            // Since handleRemove is defined in scope, we can call it.
-            handleRemove(selectedIds);
-          }
-        }
-      }
-
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'c') {
-          const selected = elements.filter(el => selectedIds.includes(el.id));
-          if (selected.length > 0) {
-            setClipboard(selected);
-          }
-        }
-        if (e.key === 'v') {
-          if (clipboard.length > 0) {
-            const newIds: string[] = [];
-            const newItems: FarmElement[] = [];
-
-            clipboard.forEach(el => {
-              const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `el-${Date.now()}-${Math.random()}`;
-              newIds.push(newId);
-              newItems.push({
-                ...el,
-                id: newId,
-                x: el.x + 20,
-                y: el.y + 20,
-                name: `${el.name} (Copy)`
-              });
-            });
-
-            const nextElements = [...elements, ...newItems];
-            setElements(nextElements);
-            pushToHistory(nextElements);
-            setSelectedIds(newIds);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, elements, clipboard, historyIndex, history]);
-
+  if (!project) {
+    return (
+      <div className="w-full h-screen bg-neutral-950 text-white font-sans board-pattern">
+        <ProjectWizard onComplete={handleProjectCreated} />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-screen bg-neutral-900 text-white overflow-hidden">
-      <div className="flex flex-col flex-1">
-        <header className="h-14 bg-neutral-800 border-b border-neutral-700 flex items-center px-4 gap-3 shadow-sm z-10">
-          <div className="p-1.5 bg-blue-600 rounded-lg">
-            <Layout size={20} className="text-white" />
-          </div>
-          <h1 className="font-bold text-lg tracking-tight">MyMushroomFarm <span className="text-neutral-500 font-normal">Designer</span></h1>
-          {/* History Controls */}
-          <div className="ml-auto flex gap-2">
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 bg-neutral-700 rounded hover:bg-neutral-600 disabled:opacity-50 text-neutral-300 hover:text-white" title="Undo (Ctrl+Z)">
-              <Undo2 size={16} />
-            </button>
-            <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="p-2 bg-neutral-700 rounded hover:bg-neutral-600 disabled:opacity-50 text-neutral-300 hover:text-white" title="Redo (Ctrl+Y)">
-              <Redo2 size={16} />
-            </button>
-          </div>
-        </header>
-
-        <div className="flex flex-1 overflow-hidden">
+    <MainLayout project={project} currentView={currentView} onViewChange={setCurrentView}>
+      {/* Render View Content */}
+      {currentView === 'farm-designer' && (
+        <div className="flex h-full w-full">
           <ElementList />
-          <Canvas
-            elements={elements}
-            selectedIds={selectedIds}
-            view={view}
-            onViewChange={setView}
-            onDrop={handleDrop}
-            onRemove={handleRemove}
-            onMove={handleMoveLive}
-            onInteractionEnd={handleInteractionEnd}
-            onResize={handleResize}
-            onRotate={handleRotate}
-            onDuplicate={(id) => handleDuplicate([id])}
-            onDuplicateReturn={handleDuplicateReturn}
-            onColorChange={handleColorChange}
-            onRename={handleRename}
-            onSelect={handleSelect}
-            onAlign={handleAlign}
-            onDistribute={handleDistribute}
-          />
+          <div className="flex-1 relative flex flex-col h-full overflow-hidden">
+            <div className="absolute top-4 left-4 z-10 flex gap-2">
+              <div className="bg-neutral-800 text-white px-3 py-1 rounded shadow-lg text-xs font-mono border border-neutral-700">
+                Scale: {(view.scale * 100).toFixed(0)}%
+              </div>
+              <div className="bg-neutral-800 text-white px-3 py-1 rounded shadow-lg text-xs font-mono border border-neutral-700">
+                Items: {elements.length}
+              </div>
+            </div>
+
+            <Canvas
+              elements={elements}
+              view={view}
+              onViewChange={setView}
+              selectedIds={selectedIds}
+              onDrop={handleDrop}
+              onRemove={handleRemove}
+              onMove={handleMove}
+              onResize={handleResize}
+              onRotate={handleRotate}
+              onDuplicate={handleDuplicate}
+              onDuplicateReturn={handleDuplicateReturn}
+              onColorChange={(id, c) => setElements(elements.map(e => e.id === id ? { ...e, color: c } : e))}
+              onRename={(id, n) => setElements(elements.map(e => e.id === id ? { ...e, name: n } : e))}
+              onSelect={(id, multi) => {
+                if (id === null) setSelectedIds([]);
+                else setSelectedIds(multi ? (selectedIds.includes(id) ? selectedIds.filter(i => i !== id) : [...selectedIds, id]) : [id]);
+              }}
+              onAlign={handleAlign}
+              onDistribute={handleDistribute}
+              onInteractionEnd={handleInteractionEnd}
+            />
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+
+      {currentView !== 'farm-designer' && (
+        <div className="flex items-center justify-center h-full text-neutral-500 flex-col gap-4">
+          <div className="text-4xl text-neutral-700 animate-pulse font-bold uppercase tracking-widest">
+            {currentView.replace('-', ' ')}
+          </div>
+          <p className="text-sm">Work in progress...</p>
+        </div>
+      )}
+    </MainLayout>
   );
 }
 
