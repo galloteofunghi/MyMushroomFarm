@@ -1,12 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  background-color: #1a1a1a;
+  background-color: #000000;
+  /* Nero styled */
   color: #ffffff;
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
   margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  /* Critical for full screen app */
 }

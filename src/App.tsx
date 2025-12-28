@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Canvas from './components/Canvas';
 import ElementList from './components/ElementList';
 import ProjectWizard from './components/ProjectWizard';
 import MainLayout from './components/MainLayout';
+import SettingsView from './components/SettingsView';
 import { persistenceManager } from './services/persistence';
 import type { FarmElement, Project } from './types';
 
@@ -37,6 +38,8 @@ function App() {
     load();
   }, []);
 
+  const arrowMoveDirty = useRef(false);
+
   // 2. Auto-Save Project when elements change
   useEffect(() => {
     if (project) {
@@ -62,6 +65,84 @@ function App() {
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
   };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setElements(history[newIndex]);
+      const newElements = history[newIndex];
+      setSelectedIds(prev => prev.filter(id => newElements.find(e => e.id === id)));
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setElements(history[newIndex]);
+      const newElements = history[newIndex];
+      setSelectedIds(prev => prev.filter(id => newElements.find(e => e.id === id)));
+    }
+  };
+
+  // --- Keyboard Shortcuts ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if input is focused
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      // Undo: Ctrl+Z
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+
+      // Redo: Ctrl+Y or Ctrl+Shift+Z
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+
+      // Arrow Movement
+      if (selectedIds.length > 0 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        arrowMoveDirty.current = true; // Mark as dirty
+        const step = e.shiftKey ? 10 : 1; // Faster with Shift
+
+        let dx = 0;
+        let dy = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        if (e.key === 'ArrowRight') dx = step;
+        if (e.key === 'ArrowUp') dy = -step;
+        if (e.key === 'ArrowDown') dy = step;
+
+        setElements(prevElements => {
+          const nextElements = prevElements.map(el => {
+            if (selectedIds.includes(el.id)) {
+              return { ...el, x: el.x + dx, y: el.y + dy };
+            }
+            return el;
+          });
+          return nextElements;
+        });
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (arrowMoveDirty.current && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        arrowMoveDirty.current = false;
+        pushToHistory(elements);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [historyIndex, history, selectedIds, elements, pushToHistory, undo, redo]); // Re-bind when state changes relevant to Undo/Redo/Selection
 
   const handleDrop = (item: any, dropX: number, dropY: number) => {
     const x = (dropX - view.x) / view.scale;
@@ -249,7 +330,7 @@ function App() {
     <MainLayout project={project} currentView={currentView} onViewChange={setCurrentView}>
       {/* Render View Content */}
       {currentView === 'farm-designer' && (
-        <div className="flex h-full w-full">
+        <div className="flex flex-col h-full w-full">
           <ElementList />
           <div className="flex-1 relative flex flex-col h-full overflow-hidden">
             <div className="absolute top-4 left-4 z-10 flex gap-2">
@@ -287,7 +368,11 @@ function App() {
         </div>
       )}
 
-      {currentView !== 'farm-designer' && (
+      {currentView === 'settings' && (
+        <SettingsView project={project} onUpdateProject={setProject} />
+      )}
+
+      {currentView !== 'farm-designer' && currentView !== 'settings' && (
         <div className="flex items-center justify-center h-full text-neutral-500 flex-col gap-4">
           <div className="text-4xl text-neutral-700 animate-pulse font-bold uppercase tracking-widest">
             {currentView.replace('-', ' ')}

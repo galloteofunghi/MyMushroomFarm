@@ -1,37 +1,44 @@
 import React from 'react';
-import { Warehouse, Box, ThermometerSnowflake, Ruler, MapPin, Truck, Building2, ParkingSquare, CornerDownRight, Split, Route } from 'lucide-react';
+import { Warehouse, Box, ThermometerSnowflake, MapPin, Truck, Building2, ParkingSquare, CornerDownRight, Split, Route, ZoomIn, Layers } from 'lucide-react';
 
-const ElementList: React.FC = () => {
+interface ElementListProps {
+    stats?: {
+        scale: number;
+        count: number;
+    };
+}
+
+const ElementList: React.FC<ElementListProps> = ({ stats }) => {
     const categories = [
         {
-            title: 'Coltivazione',
+            title: 'CLT', // Cultivation
             items: [
-                { type: 'greenhouse', label: 'Serra Coltura', icon: <Warehouse size={20} />, width: 100, height: 200 },
-                { type: 'room', label: 'Stanza Custom', icon: <Box size={20} />, width: 150, height: 150 },
-                { type: 'fridge', label: 'Cella Frigo', icon: <ThermometerSnowflake size={20} />, width: 120, height: 100 },
-                { type: 'incubation_room', label: 'Incubazione', icon: <ThermometerSnowflake size={20} className="text-purple-400" />, width: 120, height: 120 },
+                { type: 'greenhouse', label: 'Serra Coltura', icon: <Warehouse size={18} />, width: 100, height: 200 },
+                { type: 'room', label: 'Stanza Custom', icon: <Box size={18} />, width: 150, height: 150 },
+                { type: 'fridge', label: 'Cella Frigo', icon: <ThermometerSnowflake size={18} />, width: 120, height: 100 },
+                { type: 'incubation_room', label: 'Incubazione', icon: <ThermometerSnowflake size={18} className="text-purple-400" />, width: 120, height: 120 },
             ]
         },
         {
-            title: 'Infrastruttura',
+            title: 'INF', // Infrastructure
             items: [
-                { type: 'road_straight', label: 'Strada Dritta', icon: <Route size={20} />, width: 200, height: 60 },
-                { type: 'road_curve', label: 'Curva', icon: <CornerDownRight size={20} />, width: 100, height: 100 },
-                { type: 'road_intersection', label: 'Incrocio', icon: <Split size={20} />, width: 150, height: 150 },
+                { type: 'road_straight', label: 'Strada Dritta', icon: <Route size={18} />, width: 200, height: 60 },
+                { type: 'road_curve', label: 'Curva', icon: <CornerDownRight size={18} />, width: 100, height: 100 },
+                { type: 'road_intersection', label: 'Incrocio', icon: <Split size={18} />, width: 150, height: 150 },
             ]
         },
         {
-            title: 'Logistica',
+            title: 'LOG', // Logistics
             items: [
-                { type: 'parking', label: 'Parcheggio', icon: <ParkingSquare size={20} />, width: 100, height: 80 },
-                { type: 'truck_parking', label: 'Park Camion', icon: <Truck size={20} />, width: 150, height: 80 },
-                { type: 'loading_area', label: 'Carico/Scarico', icon: <MapPin size={20} />, width: 150, height: 100 },
+                { type: 'parking', label: 'Parcheggio', icon: <ParkingSquare size={18} />, width: 100, height: 80 },
+                { type: 'truck_parking', label: 'Park Camion', icon: <Truck size={18} />, width: 150, height: 80 },
+                { type: 'loading_area', label: 'Carico/Scarico', icon: <MapPin size={18} />, width: 150, height: 100 },
             ]
         },
         {
-            title: 'Edifici',
+            title: 'OFF', // Office
             items: [
-                { type: 'office', label: 'Uffici', icon: <Building2 size={20} />, width: 120, height: 120 },
+                { type: 'office', label: 'Uffici', icon: <Building2 size={18} />, width: 120, height: 120 },
             ]
         }
     ];
@@ -48,46 +55,52 @@ const ElementList: React.FC = () => {
     };
 
     return (
-        <div className="w-64 bg-neutral-800 border-r border-neutral-700 flex flex-col overflow-y-auto">
-            <div className="p-4 pb-2">
-                <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-2">Elementi</h2>
-            </div>
-
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {categories.map((cat, idx) => (
-                    <div key={idx} className="mb-4 px-4">
-                        <h3 className="text-xs font-bold text-neutral-500 mb-2 uppercase tracking-wide">{cat.title}</h3>
-                        <div className="flex flex-col gap-2">
-                            {cat.items.map((item) => (
-                                <div
-                                    key={item.type}
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, item)}
-                                    className="flex items-center gap-3 p-3 bg-neutral-700/50 hover:bg-neutral-600 rounded-lg border border-transparent hover:border-neutral-500 cursor-grab active:cursor-grabbing transition-all group"
-                                >
-                                    <div className="text-neutral-400 group-hover:text-white transition-colors">
-                                        {item.icon}
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-sm font-medium text-neutral-200 group-hover:text-white">{item.label}</span>
-                                        <span className="text-[10px] text-neutral-500">{item.width}x{item.height}</span>
-                                    </div>
+        <div className="w-full h-14 bg-black/90 border-b border-neutral-800 flex items-center px-6 gap-6 backdrop-blur-sm z-10 shrink-0 overflow-x-auto custom-scrollbar">
+            {categories.map((cat, idx) => (
+                <div key={idx} className="flex items-center gap-3 shrink-0">
+                    <span className="text-[9px] font-bold text-neutral-600 uppercase tracking-wider writing-mode-vertical rotate-180 hidden">{cat.title}</span>
+                    <div className="flex items-center gap-2">
+                        {cat.items.map((item) => (
+                            <div
+                                key={item.type}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, item)}
+                                className="
+                                    w-10 h-10 flex items-center justify-center rounded-lg 
+                                    bg-neutral-900 border border-neutral-800 text-neutral-400
+                                    hover:bg-neutral-800 hover:text-ochre-500 hover:border-ochre-500/50 
+                                    cursor-grab active:cursor-grabbing transition-all group relative
+                                "
+                                title={item.label}
+                            >
+                                {item.icon}
+                                {/* Tooltip */}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded-md text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-white shadow-xl">
+                                    {item.label}
                                 </div>
-                            ))}
-                        </div>
+                            </div>
+                        ))}
                     </div>
-                ))}
-            </div>
-
-            <div className="p-4 bg-neutral-900 border-t border-neutral-700">
-                <div className="flex items-center gap-2 text-neutral-400 mb-1">
-                    <Ruler size={14} />
-                    <span className="text-xs font-medium">Info</span>
+                    {idx < categories.length - 1 && <div className="w-px h-8 bg-neutral-800 mx-1" />}
                 </div>
-                <p className="text-[10px] text-neutral-500 leading-tight">
-                    Trascina nella griglia. Shift+Click per selezione multipla.
-                </p>
-            </div>
+            ))}
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Stats Display */}
+            {stats && (
+                <div className="flex items-center gap-4 text-xs font-mono text-neutral-500 border-l border-neutral-800 pl-6 h-full select-none">
+                    <div className="flex items-center gap-2">
+                        <ZoomIn size={14} />
+                        <span>{(stats.scale * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Layers size={14} />
+                        <span>{stats.count} items</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

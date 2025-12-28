@@ -74,6 +74,7 @@ const Canvas: React.FC<CanvasProps> = ({
     // --- Drag and Drop ---
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         e.dataTransfer.dropEffect = 'copy';
         if (!isDragOver) setIsDragOver(true);
     };
@@ -84,13 +85,15 @@ const Canvas: React.FC<CanvasProps> = ({
         e.preventDefault();
         setIsDragOver(false);
         const data = e.dataTransfer.getData('text/plain');
+        console.log('Canvas handleDrop:', data); // DEBUG
         if (!data) return;
         try {
             const item = JSON.parse(data);
             const rect = containerRef.current?.getBoundingClientRect();
+            console.log('Drop Rect:', rect); // DEBUG
             if (!rect) return;
             onDrop(item, e.clientX - rect.left, e.clientY - rect.top);
-        } catch (err) { console.error(err); }
+        } catch (err) { console.error('Drop Error:', err); }
     };
 
 
@@ -421,7 +424,7 @@ const Canvas: React.FC<CanvasProps> = ({
     return (
         <div
             ref={containerRef}
-            className={`flex-1 bg-neutral-900 relative overflow-hidden board-pattern transition-colors select-none ${isDragOver ? 'border-4 border-blue-500' : ''}`}
+            className={`flex-1 w-full h-full min-h-[400px] bg-neutral-900 relative overflow-hidden board-pattern transition-colors select-none ${isDragOver ? 'border-4 border-blue-500' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
