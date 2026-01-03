@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import type { FarmElement } from '../types';
-import { Copy, RotateCw, Trash2, Warehouse, Box, ThermometerSnowflake, ZoomIn, ZoomOut, Maximize, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, ArrowUpToLine, ArrowDownToLine, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MapPin, Building2 } from 'lucide-react';
+import { Copy, RotateCw, Trash2, Warehouse, Box, ThermometerSnowflake, ZoomIn, ZoomOut, Maximize, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, ArrowUpToLine, ArrowDownToLine, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MapPin, Building2, Sprout } from 'lucide-react';
 
 interface CanvasProps {
     elements: FarmElement[];
@@ -20,13 +20,15 @@ interface CanvasProps {
     onAlign: (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void;
     onDistribute: (type: 'horizontal' | 'vertical') => void;
     onInteractionEnd: () => void;
+    isEditing: boolean;
 }
 
 const Canvas: React.FC<CanvasProps> = ({
     elements, selectedIds, view, onViewChange,
     onDrop, onRemove, onMove, onResize,
     onRotate, onDuplicate, onDuplicateReturn, onColorChange, onRename,
-    onSelect, onAlign, onDistribute, onInteractionEnd
+    onSelect, onAlign, onDistribute, onInteractionEnd,
+    isEditing
 }) => {
     // Interaction States
     const [dragging, setDragging] = React.useState<{ id: string; startX: number; startY: number } | null>(null);
@@ -84,13 +86,14 @@ const Canvas: React.FC<CanvasProps> = ({
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragOver(false);
+
+        if (!isEditing) return; // Feature: Disable drop when monitoring
+
         const data = e.dataTransfer.getData('text/plain');
-        console.log('Canvas handleDrop:', data); // DEBUG
         if (!data) return;
         try {
             const item = JSON.parse(data);
             const rect = containerRef.current?.getBoundingClientRect();
-            console.log('Drop Rect:', rect); // DEBUG
             if (!rect) return;
             onDrop(item, e.clientX - rect.left, e.clientY - rect.top);
         } catch (err) { console.error('Drop Error:', err); }
@@ -109,6 +112,9 @@ const Canvas: React.FC<CanvasProps> = ({
 
         if (e.button !== 0) return; // Only left click
 
+        // Feature: Disable selection/move when monitoring
+        if (!isEditing) return;
+
         const isSelected = selectedIds.includes(id);
 
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
@@ -125,6 +131,7 @@ const Canvas: React.FC<CanvasProps> = ({
         } else {
             if (!isSelected) {
                 onSelect(id, false);
+                setTempName(null); // Fix: Clear previous temporary name on new selection
             }
         }
 
@@ -132,6 +139,8 @@ const Canvas: React.FC<CanvasProps> = ({
     };
 
     const handleResizeStart = (e: React.MouseEvent, id: string, width: number, height: number, left: number, top: number, rotation: number, direction: string) => {
+        if (!isEditing) return; // Feature: Disable resize when monitoring
+
         e.stopPropagation();
         e.preventDefault();
         setResizing({
@@ -150,6 +159,9 @@ const Canvas: React.FC<CanvasProps> = ({
             return;
         }
 
+        // Feature: Disable move/resize interaction when monitoring
+        if (!isEditing) return;
+
         if (dragging) {
             const screenDx = e.clientX - dragging.startX;
             const screenDy = e.clientY - dragging.startY;
@@ -159,7 +171,7 @@ const Canvas: React.FC<CanvasProps> = ({
             let stepY = screenDy / view.scale;
 
             // --- Snapping Logic ---
-            const SNAP_THRESHOLD = 8 / view.scale;
+            const SNAP_THRESHOLD = 4 / view.scale;
             const activeEl = elements.find(el => el.id === dragging.id);
             const otherElements = elements.filter(el => !selectedIds.includes(el.id) && el.id !== dragging.id); // Don't snap to self or other moving selection
             const newGuidelines: { x?: number, y?: number }[] = [];
@@ -340,10 +352,30 @@ const Canvas: React.FC<CanvasProps> = ({
         const minX = Math.min(...selected.map(e => e.x));
         const maxX = Math.max(...selected.map(e => e.x + e.width));
         const minY = Math.min(...selected.map(e => e.y));
-        return { x: minX + (maxX - minX) / 2, y: minY };
+        const maxY = Math.max(...selected.map(e => e.y + e.height));
+        return { x: minX + (maxX - minX) / 2, minY, maxY };
     };
 
     const selectionBounds = getSelectionBounds();
+
+    // Calculate Menu Position
+    let menuTop = 0;
+    if (selectionBounds) {
+        // Check if top position is off-screen
+        // World Y of top menu (approx 80px height including padding)
+        const menuHeight = 80;
+        const topCandidateY = selectionBounds.minY - menuHeight;
+        const screenTopY = topCandidateY * view.scale + view.y;
+
+        // If screenTopY is too close to 0 (top bar height approx 60px + buffer)
+        if (screenTopY < 80) {
+            // Flip to bottom
+            menuTop = selectionBounds.maxY + 20;
+        } else {
+            // Standard top position
+            menuTop = selectionBounds.minY - 70;
+        }
+    }
 
     // Helper to render distinct internal content
     const renderElementContent = (el: FarmElement) => {
@@ -480,6 +512,7 @@ const Canvas: React.FC<CanvasProps> = ({
                     const isSelected = selectedIds.includes(el.id);
                     const isInteracting = dragging?.id === el.id || resizing?.id === el.id;
                     const isRoad = el.type.startsWith('road') || el.type.includes('parking');
+                    const isProductionElement = ['greenhouse', 'room', 'fridge', 'incubation_room'].includes(el.type);
 
                     return (
                         <div
@@ -493,7 +526,7 @@ const Canvas: React.FC<CanvasProps> = ({
                                 height: el.height,
                                 transform: `rotate(${el.rotation || 0}deg)`,
                                 backgroundColor: el.color,
-                                cursor: dragging?.id === el.id ? 'grabbing' : 'grab',
+                                cursor: dragging?.id === el.id ? 'grabbing' : (isEditing ? 'grab' : 'pointer'),
                                 zIndex: isSelected ? 10 : 1,
                                 pointerEvents: 'auto'
                             }}
@@ -508,9 +541,24 @@ const Canvas: React.FC<CanvasProps> = ({
                             {/* RENDER CONTENT */}
                             {renderElementContent(el)}
 
+                            {/* Monitoring Overlay (View Mode) */}
+                            {!isEditing && isProductionElement && (
+                                <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex flex-col items-center justify-center text-white p-2">
+                                    <div className="flex flex-col items-center gap-1">
+                                        <Sprout size={24} className="text-green-400" />
+                                        <div className="text-[10px] uppercase font-bold text-neutral-300">{el.name}</div>
 
-                            {/* Floating Icon (Only for non-road/infra elements to be cleaner) */}
-                            {!isRoad && (
+                                        {/* Capacity Bar Placeholder */}
+                                        <div className="w-full h-1.5 bg-neutral-700 rounded-full overflow-hidden mt-1 w-[80%]">
+                                            <div className="h-full bg-green-500 w-[0%]"></div>
+                                        </div>
+                                        <div className="text-[9px] text-neutral-400 mt-0.5">0 / {el.capacity || '?'} bags</div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Floating Icon (Editing Mode) */}
+                            {isEditing && !isRoad && (
                                 <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-white/50 p-1 bg-neutral-900/50 rounded-full pointer-events-none" style={{ transform: `rotate(${- (el.rotation || 0)}deg)` }}>
                                     {el.type === 'greenhouse' && <Warehouse size={16} />}
                                     {el.type === 'room' && <Box size={16} />}
@@ -521,47 +569,49 @@ const Canvas: React.FC<CanvasProps> = ({
                                 </div>
                             )}
 
-                            {/* Labels & Dims */}
-                            <div className="absolute w-full px-2 text-center z-10 pointer-events-none" style={{ transform: `rotate(${- (el.rotation || 0)}deg)` }}>
-                                {isSelected && selectedIds.length === 1 ? (
-                                    <input
-                                        className="w-full bg-transparent text-center text-xs font-bold outline-none border-b border-transparent focus:border-white text-white drop-shadow-md pointer-events-auto"
-                                        value={tempName !== null ? tempName : el.name}
-                                        onChange={(e) => setTempName(e.target.value)}
-                                        onBlur={() => { if (tempName) onRename(el.id, tempName); setTempName(null); }}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') { if (tempName) onRename(el.id, tempName); setTempName(null); e.currentTarget.blur(); } }}
-                                        onFocus={() => setTempName(el.name)}
-                                        onMouseDown={e => e.stopPropagation()}
-                                    />
-                                ) : (
-                                    <span className={`text-xs font-bold truncate block drop-shadow-md ${isRoad ? 'hidden group-hover:block text-white/70' : 'text-white'}`}>{el.name}</span>
-                                )}
+                            {/* Labels & Dims (Editing Mode) */}
+                            {isEditing && (
+                                <div className="absolute w-full px-2 text-center z-10 pointer-events-none" style={{ transform: `rotate(${- (el.rotation || 0)}deg)` }}>
+                                    {isSelected && selectedIds.length === 1 ? (
+                                        <input
+                                            className="w-full bg-transparent text-center text-xs font-bold outline-none border-b border-transparent focus:border-white text-white drop-shadow-md pointer-events-auto"
+                                            value={tempName !== null ? tempName : el.name}
+                                            onChange={(e) => setTempName(e.target.value)}
+                                            onBlur={() => { if (tempName) onRename(el.id, tempName); setTempName(null); }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') { if (tempName) onRename(el.id, tempName); setTempName(null); e.currentTarget.blur(); } }}
+                                            onFocus={() => setTempName(el.name)}
+                                            onMouseDown={e => e.stopPropagation()}
+                                        />
+                                    ) : (
+                                        <span className={`text-xs font-bold truncate block drop-shadow-md ${isRoad ? 'hidden group-hover:block text-white/70' : 'text-white'}`}>{el.name}</span>
+                                    )}
 
-                                {/* Dims - Editable */}
-                                {(isInteracting || isSelected) && (
-                                    <div
-                                        className="text-[10px] text-neutral-300 font-mono mt-0.5 drop-shadow-md cursor-pointer hover:text-white hover:underline pointer-events-auto"
-                                        onMouseDown={(e) => {
-                                            e.stopPropagation();
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            const w = prompt("Larghezza:", Math.round(el.width).toString());
-                                            if (w) {
-                                                const h = prompt("Altezza:", Math.round(el.height).toString());
-                                                if (h && !isNaN(Number(w)) && !isNaN(Number(h))) {
-                                                    onResize(el.id, Number(w), Number(h));
-                                                    onInteractionEnd();
+                                    {/* Dims - Editable */}
+                                    {(isInteracting || isSelected) && (
+                                        <div
+                                            className="text-[10px] text-neutral-300 font-mono mt-0.5 drop-shadow-md cursor-pointer hover:text-white hover:underline pointer-events-auto"
+                                            onMouseDown={(e) => {
+                                                e.stopPropagation();
+                                            }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const w = prompt("Larghezza:", Math.round(el.width).toString());
+                                                if (w) {
+                                                    const h = prompt("Altezza:", Math.round(el.height).toString());
+                                                    if (h && !isNaN(Number(w)) && !isNaN(Number(h))) {
+                                                        onResize(el.id, Number(w), Number(h));
+                                                        onInteractionEnd();
+                                                    }
                                                 }
-                                            }
-                                        }}
-                                    >
-                                        {Math.round(el.width)} x {Math.round(el.height)}
-                                    </div>
-                                )}
-                            </div>
+                                            }}
+                                        >
+                                            {Math.round(el.width)} x {Math.round(el.height)}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
-                            {isSelected && selectedIds.length === 1 && !dragging && (
+                            {isSelected && selectedIds.length === 1 && !dragging && isEditing && (
                                 <>
                                     <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize -ml-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'nw')} />
                                     <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize -mr-1.5 -mt-1.5 bg-white border border-neutral-400 rounded-sm z-20" onMouseDown={(e) => handleResizeStart(e, el.id, el.width, el.height, el.x, el.y, el.rotation || 0, 'ne')} />
@@ -573,10 +623,10 @@ const Canvas: React.FC<CanvasProps> = ({
                     );
                 })}
 
-                {selectionBounds && !dragging && (
+                {selectionBounds && !dragging && isEditing && (
                     <div
                         className="absolute flex flex-col gap-1 bg-neutral-800 p-1.5 rounded-lg border border-neutral-700 shadow-xl z-50 pointer-events-auto"
-                        style={{ left: selectionBounds.x, top: selectionBounds.y - 70, transform: 'translateX(-50%)' }}
+                        style={{ left: selectionBounds.x, top: menuTop, transform: 'translateX(-50%)' }}
                         onMouseDown={e => e.stopPropagation()}
                     >
                         <div className="flex gap-1">

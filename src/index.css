@@ -1,8 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  background-color: #000000;
-  /* Nero styled */
+  background-color: #050505;
   color: #ffffff;
 }
 
@@ -14,5 +13,32 @@ body,
   margin: 0;
   padding: 0;
   overflow: hidden;
-  /* Critical for full screen app */
+}
+
+/* Premium Dark Grey Background */
+body {
+  background-color: #171717;
+  /* Neutral 900 base */
+  background-image: radial-gradient(circle at 50% 0%, #262626, #171717);
+  /* Lighter top spotlight */
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #171717;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #db871e;
+  /* Ochre 500 */
 }

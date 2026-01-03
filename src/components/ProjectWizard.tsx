@@ -259,20 +259,20 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({ onComplete }) => {
     );
 
     return (
-        <div className="fixed inset-0 bg-black text-white z-50 flex flex-col font-sans">
-            {/* Minimal Header */}
-            <div className="h-20 flex items-center justify-between px-8 border-b border-neutral-900 bg-black/50 backdrop-blur-md sticky top-0 z-20">
+        <div className="fixed inset-0 bg-neutral-950 text-white z-50 flex flex-col font-sans bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-neutral-900 via-neutral-950 to-black">
+            {/* Consistent Header */}
+            <div className="h-24 flex items-center justify-between px-10 border-b border-neutral-800 bg-neutral-900 shadow-lg sticky top-0 z-20">
                 <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-ochre-500 rounded-lg flex items-center justify-center font-bold text-black text-xl">
+                    <div className="w-12 h-12 bg-ochre-500 rounded-lg flex items-center justify-center font-bold text-black text-2xl shadow-lg shadow-ochre-500/20">
                         F
                     </div>
-                    <span className="font-bold text-xl tracking-wide">FarmDesigner</span>
+                    <span className="font-bold text-2xl tracking-tight text-white">FarmDesigner</span>
                 </div>
 
                 {/* Steps Indicator */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3 bg-neutral-800 px-4 py-2 rounded-lg border border-neutral-700">
                     {[1, 2, 3].map(i => (
-                        <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${step >= i ? 'w-8 bg-ochre-500' : 'w-2 bg-neutral-800'}`} />
+                        <div key={i} className={`h-2 rounded-full transition-all duration-500 ease-out ${step >= i ? 'w-10 bg-ochre-500' : 'w-2 bg-neutral-600'}`} />
                     ))}
                 </div>
             </div>
@@ -285,10 +285,13 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({ onComplete }) => {
             </div>
 
             {/* Footer Actions */}
-            <div className="h-24 border-t border-neutral-900 bg-black/50 backdrop-blur-md flex items-center justify-between px-8">
+            <div className="h-28 border-t border-neutral-800 bg-neutral-900 flex items-center justify-between px-10 shadow-2xl-up">
                 <button
                     onClick={() => setStep(s => Math.max(1, s - 1))}
-                    className={`text-neutral-500 hover:text-white transition-colors flex items-center gap-2 px-6 py-3 uppercase tracking-widest text-xs font-bold ${step === 1 ? 'invisible' : ''}`}
+                    className={`
+                        text-neutral-400 hover:text-white transition-colors flex items-center gap-2 px-6 py-3 uppercase tracking-widest text-xs font-bold hover:bg-neutral-800 rounded-lg border border-transparent hover:border-neutral-700
+                        ${step === 1 ? 'invisible' : ''}
+                    `}
                 >
                     Indietro
                 </button>
@@ -296,10 +299,14 @@ const ProjectWizard: React.FC<ProjectWizardProps> = ({ onComplete }) => {
                 <button
                     onClick={handleNext}
                     disabled={(step === 1 && !companyName) || (step === 2 && activeMushrooms.length === 0)}
-                    className="bg-ochre-600 hover:bg-ochre-500 text-black px-8 py-4 rounded-xl flex items-center gap-3 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 shadow-[0_0_20px_rgba(219,135,30,0.4)]"
+                    className={`
+                        bg-ochre-500 hover:bg-ochre-400 text-black px-10 py-5 rounded-xl flex items-center gap-3 font-bold text-xl 
+                        disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none
+                        transition-all hover:scale-[1.02] shadow-xl shadow-ochre-500/10 border border-ochre-400
+                    `}
                 >
                     {step === 3 ? 'Crea Progetto' : 'Continua'}
-                    <ArrowRight size={20} />
+                    <ArrowRight size={24} />
                 </button>
             </div>
         </div>

@@ -10,7 +10,18 @@ export interface FarmElement<T = Record<string, any>> {
     y: number;
     rotation?: number;
     color?: string;
+    // Production Data
+    capacity?: number; // max capacity in bags/units
+    contents?: Batch[]; // current contents
     data?: T;
+}
+
+export interface Batch {
+    id: string;
+    strain: MushroomType;
+    quantity: number; // number of bags
+    startDate: number; // timestamp
+    stage: 'incubation' | 'fruiting' | 'harvesting' | 'compost';
 }
 
 export type MushroomType =
