@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import type { FarmElement } from '../types';
 import { Copy, RotateCw, Trash2, Warehouse, Box, ThermometerSnowflake, ZoomIn, ZoomOut, Maximize, AlignLeft, AlignCenter, AlignRight, AlignVerticalJustifyCenter, ArrowUpToLine, ArrowDownToLine, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, MapPin, Building2, Sprout } from 'lucide-react';
+import MushroomIcon from './MushroomIcon';
 
 interface CanvasProps {
     elements: FarmElement[];
@@ -20,15 +21,17 @@ interface CanvasProps {
     onAlign: (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void;
     onDistribute: (type: 'horizontal' | 'vertical') => void;
     onInteractionEnd: () => void;
+    onElementDoubleClick?: (id: string) => void;
     isEditing: boolean;
+    mushroomSettings?: Record<string, any>; // Pass project settings
 }
 
 const Canvas: React.FC<CanvasProps> = ({
     elements, selectedIds, view, onViewChange,
     onDrop, onRemove, onMove, onResize,
     onRotate, onDuplicate, onDuplicateReturn, onColorChange, onRename,
-    onSelect, onAlign, onDistribute, onInteractionEnd,
-    isEditing
+    onSelect, onAlign, onDistribute, onInteractionEnd, onElementDoubleClick,
+    isEditing, mushroomSettings = {}
 }) => {
     // Interaction States
     const [dragging, setDragging] = React.useState<{ id: string; startX: number; startY: number } | null>(null);
@@ -112,8 +115,8 @@ const Canvas: React.FC<CanvasProps> = ({
 
         if (e.button !== 0) return; // Only left click
 
-        // Feature: Disable selection/move when monitoring
-        if (!isEditing) return;
+        // Feature: Disable selection/move when monitoring -> CHANGED: Allow selection, disable move/edit
+        // if (!isEditing) return;
 
         const isSelected = selectedIds.includes(id);
 
@@ -135,7 +138,9 @@ const Canvas: React.FC<CanvasProps> = ({
             }
         }
 
-        setDragging({ id, startX: e.clientX, startY: e.clientY });
+        if (isEditing) {
+            setDragging({ id, startX: e.clientX, startY: e.clientY });
+        }
     };
 
     const handleResizeStart = (e: React.MouseEvent, id: string, width: number, height: number, left: number, top: number, rotation: number, direction: string) => {
@@ -518,6 +523,10 @@ const Canvas: React.FC<CanvasProps> = ({
                         <div
                             key={el.id}
                             onMouseDown={(e) => handleMouseDown(e, el.id)}
+                            onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                if (onElementDoubleClick) onElementDoubleClick(el.id);
+                            }}
                             style={{
                                 position: 'absolute',
                                 left: el.x,
@@ -545,14 +554,51 @@ const Canvas: React.FC<CanvasProps> = ({
                             {!isEditing && isProductionElement && (
                                 <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex flex-col items-center justify-center text-white p-2">
                                     <div className="flex flex-col items-center gap-1">
-                                        <Sprout size={24} className="text-green-400" />
+                                        {el.mushroomType ? (
+                                            <MushroomIcon type={el.mushroomType} className="w-12 h-12 drop-shadow-md" />
+                                        ) : (
+                                            <Sprout size={32} className="text-green-400" />
+                                        )}
                                         <div className="text-[10px] uppercase font-bold text-neutral-300">{el.name}</div>
 
-                                        {/* Capacity Bar Placeholder */}
-                                        <div className="w-full h-1.5 bg-neutral-700 rounded-full overflow-hidden mt-1 w-[80%]">
-                                            <div className="h-full bg-green-500 w-[0%]"></div>
-                                        </div>
-                                        <div className="text-[9px] text-neutral-400 mt-0.5">0 / {el.capacity || '?'} bags</div>
+                                        {/* Simplified Status / Countdown */}
+                                        {(() => {
+                                            if (el.lifecycleStatus === 'storage') return null;
+
+                                            const typeSettings = el.mushroomType ? mushroomSettings[el.mushroomType] : null;
+
+                                            if ((el.lifecycleStatus === 'incubation' || el.lifecycleStatus === 'fruiting') && el.phaseStartDate && typeSettings) {
+                                                const duration = el.lifecycleStatus === 'incubation'
+                                                    ? typeSettings.incubationDays
+                                                    : typeSettings.firstHarvestDays; // Default to first harvest for fruiting phase
+
+                                                const endDate = el.phaseStartDate + (duration * 24 * 60 * 60 * 1000);
+                                                const now = Date.now();
+                                                const diffMs = endDate - now;
+                                                const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+                                                // Handle overdue
+                                                const isOverdue = daysLeft < 0;
+                                                const displayDays = Math.abs(daysLeft);
+
+                                                return (
+                                                    <div className={`text-[9px] font-mono mt-1 px-1.5 py-0.5 rounded ${isOverdue ? 'bg-red-500/50 text-white' : 'bg-neutral-800/50 text-green-300'}`}>
+                                                        {isOverdue ? `+${displayDays}d` : `${displayDays}d`}
+                                                    </div>
+                                                )
+                                            }
+                                            return null;
+                                        })()}
+
+                                        {/* Capacity Bar Simplified */}
+                                        {el.capacity && (
+                                            <div className="w-[80%] h-1 bg-neutral-700/50 rounded-full overflow-hidden mt-1">
+                                                <div
+                                                    className="h-full bg-white/30"
+                                                    style={{ width: `${Math.min(((el.bagCount || 0) / el.capacity) * 100, 100)}%` }}
+                                                ></div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -560,12 +606,18 @@ const Canvas: React.FC<CanvasProps> = ({
                             {/* Floating Icon (Editing Mode) */}
                             {isEditing && !isRoad && (
                                 <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-white/50 p-1 bg-neutral-900/50 rounded-full pointer-events-none" style={{ transform: `rotate(${- (el.rotation || 0)}deg)` }}>
-                                    {el.type === 'greenhouse' && <Warehouse size={16} />}
-                                    {el.type === 'room' && <Box size={16} />}
-                                    {el.type === 'fridge' && <ThermometerSnowflake size={16} />}
-                                    {el.type === 'incubation_room' && <ThermometerSnowflake size={16} className="text-purple-400" />}
-                                    {el.type === 'loading_area' && <MapPin size={16} />}
-                                    {el.type === 'office' && <Building2 size={16} />}
+                                    {el.mushroomType ? (
+                                        <MushroomIcon type={el.mushroomType} className="w-5 h-5" />
+                                    ) : (
+                                        <>
+                                            {el.type === 'greenhouse' && <Warehouse size={16} />}
+                                            {el.type === 'room' && <Box size={16} />}
+                                            {el.type === 'fridge' && <ThermometerSnowflake size={16} />}
+                                            {el.type === 'incubation_room' && <ThermometerSnowflake size={16} className="text-purple-400" />}
+                                            {el.type === 'loading_area' && <MapPin size={16} />}
+                                            {el.type === 'office' && <Building2 size={16} />}
+                                        </>
+                                    )}
                                 </div>
                             )}
 

@@ -4,9 +4,10 @@ import type { Project, FarmElement } from '../types';
 
 export const useProject = (
     initialElements: FarmElement[],
-    setElements: (els: FarmElement[]) => void,
-    setHistory: (h: FarmElement[][]) => void,
-    setHistoryIndex: (i: number) => void
+    setElements: React.Dispatch<React.SetStateAction<FarmElement[]>>,
+    setHistory: React.Dispatch<React.SetStateAction<FarmElement[][]>>,
+    setHistoryIndex: React.Dispatch<React.SetStateAction<number>>,
+    onProjectLoad?: (elements: FarmElement[]) => void
 ) => {
     const [project, setProject] = useState<Project | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -14,12 +15,18 @@ export const useProject = (
     // Initial Load
     useEffect(() => {
         const load = async () => {
-            const savedProject = await persistenceManager.loadProject();
+            const savedProject = localStorage.getItem('myMushroomFarm_project');
             if (savedProject) {
-                setProject(savedProject);
-                setElements(savedProject.elements || []);
-                setHistory([savedProject.elements || []]);
-                setHistoryIndex(0);
+                try {
+                    const parsed = JSON.parse(savedProject);
+                    setProject(parsed);
+                    setElements(parsed.elements || []);
+                    setHistory([parsed.elements || []]);
+                    setHistoryIndex(0);
+                    if (onProjectLoad) onProjectLoad(parsed.elements || []);
+                } catch (e) {
+                    console.error('Failed to load project', e);
+                }
             }
             setIsLoading(false);
         };

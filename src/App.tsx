@@ -4,6 +4,7 @@ import ElementList from './components/ElementList';
 import ProjectWizard from './components/ProjectWizard';
 import MainLayout from './components/MainLayout';
 import SettingsView from './components/SettingsView';
+import ElementDetailsDialog from './components/ElementDetailsDialog';
 import { useCanvasState } from './hooks/useCanvasState';
 import { useProject } from './hooks/useProject';
 
@@ -12,6 +13,8 @@ function App() {
 
   // 1. Canvas State & Logic
   const canvasState = useCanvasState([]);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [elementsToEdit, setElementsToEdit] = useState<any[]>([]);
 
   // 2. Project State & Logic
   // We pass setters to sync loaded project into canvas state
@@ -24,7 +27,13 @@ function App() {
     canvasState.elements,
     canvasState.setElements,
     canvasState.setHistory,
-    canvasState.setHistoryIndex
+    canvasState.setHistoryIndex,
+    // Callback when project is loaded to set mode
+    (loadedElements) => {
+      if (loadedElements.length > 0) {
+        canvasState.setIsEditing(false); // Default to Monitor Mode
+      }
+    }
   );
 
   if (isLoading) {
@@ -78,10 +87,43 @@ function App() {
               onDistribute={canvasState.handleDistribute}
               onInteractionEnd={canvasState.handleInteractionEnd}
               isEditing={canvasState.isEditing}
+              onElementDoubleClick={(id) => {
+                // Allow double click edit only in Monitor mode (or both? User said "when not in editing mode")
+                if (!canvasState.isEditing) {
+                  // If the clicked element is part of selection, edit all selected.
+                  // If not, edit just this one (and select it?)
+                  const isSelected = canvasState.selectedIds.includes(id);
+                  let targetIds = [id];
+
+                  if (isSelected && canvasState.selectedIds.length > 1) {
+                    targetIds = canvasState.selectedIds;
+                  }
+
+                  const targets = canvasState.elements.filter(e => targetIds.includes(e.id));
+                  setElementsToEdit(targets);
+                  setIsDetailsDialogOpen(true);
+                }
+              }}
+              mushroomSettings={project.mushroomSettings}
             />
           </div>
         </div>
       )}
+
+      {/* Editing Modal */}
+      <ElementDetailsDialog
+        isOpen={isDetailsDialogOpen}
+        onClose={() => setIsDetailsDialogOpen(false)}
+        selectedElements={elementsToEdit}
+        onSave={(updates) => {
+          canvasState.setElements(prev => prev.map(el => {
+            if (elementsToEdit.find(t => t.id === el.id)) {
+              return { ...el, ...updates };
+            }
+            return el;
+          }));
+        }}
+      />
 
       {currentView === 'settings' && (
         <SettingsView project={project} onUpdateProject={setProject} />

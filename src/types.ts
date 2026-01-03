@@ -12,6 +12,10 @@ export interface FarmElement<T = Record<string, any>> {
     color?: string;
     // Production Data
     capacity?: number; // max capacity in bags/units
+    bagCount?: number; // current number of bags
+    lifecycleStatus?: 'storage' | 'incubation' | 'fruiting';
+    phaseStartDate?: number; // timestamp
+    mushroomType?: MushroomType;
     contents?: Batch[]; // current contents
     data?: T;
 }
@@ -26,8 +30,10 @@ export interface Batch {
 
 export type MushroomType =
     | 'Pleurotus'
+    | 'Pleurotus'
     | 'Pleurotus Cornucopiae'
-    | 'Prataiolo'
+    | 'Champignon Bianco'
+    | 'Champignon Crema'
     | 'Pioppino'
     | 'Cardoncello'
     | 'Shiitake'
